@@ -4,6 +4,7 @@ import uuid
 
 from src import ddl
 from src.oracle_meta import Column, ForeignKey, Table
+from src.turso_push import _upsert, _upload_row
 from src.typemap import convert_value, is_uuid, sqlite_type, uuid_to_text
 
 
@@ -42,3 +43,23 @@ def test_ddl_runs_in_sqlite():
     db.execute(sql, (1, None, "a"))
     db.execute(sql, (1, None, "b"))
     assert db.execute("SELECT N FROM C").fetchall() == [("b",)]
+
+
+def test_turso_users_upload_maps_legacy_columns_and_null_admin():
+    source = sqlite3.connect(":memory:")
+    source.execute("CREATE TABLE USERS (ID TEXT PRIMARY KEY, CENTER_IDS TEXT, IS_ADMIN INTEGER)")
+    source.execute("INSERT INTO USERS VALUES ('u1', '[1,2]', NULL)")
+    target = sqlite3.connect(":memory:")
+    target.execute(
+        "CREATE TABLE users (id TEXT PRIMARY KEY, associated_centers TEXT, "
+        "is_admin INTEGER NOT NULL DEFAULT 0)"
+    )
+
+    cols, pk, sql = _upsert(source, "USERS")
+    row = source.execute("SELECT %s FROM USERS" % ", ".join(map(ddl.q, cols))).fetchone()
+    target.execute(sql, _upload_row("USERS", cols, row))
+
+    assert pk == ["ID"]
+    assert target.execute(
+        "SELECT associated_centers, is_admin FROM users WHERE id = 'u1'"
+    ).fetchone() == ("[1,2]", 0)

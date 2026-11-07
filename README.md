@@ -103,6 +103,8 @@ using primary keys. Tables without a primary key are replaced on upload. Views
 in the SQLite export are also recreated in Turso. The command asks before
 uploading each table when run interactively; use `--yes` to upload all tables.
 Uploading requires network access and a valid Turso database URL and token.
+For `USERS`, legacy `CENTER_IDS` values are uploaded as `ASSOCIATED_CENTERS`,
+and null `IS_ADMIN` values are uploaded as `0`.
 
 ## Run the full workflow
 

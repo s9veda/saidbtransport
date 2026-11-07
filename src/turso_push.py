@@ -14,6 +14,7 @@ from .prompt import confirm
 log = logging.getLogger("saidbtransport")
 MAX_STMTS = 500
 MAX_BYTES = 2_000_000
+UPLOAD_COLUMN_MAP = {"USERS": {"CENTER_IDS": "ASSOCIATED_CENTERS"}}
 
 
 def q(name):
@@ -89,13 +90,23 @@ def _upsert(db, table):
     info = db.execute("PRAGMA table_info(%s)" % q(table)).fetchall()
     cols = [r[1] for r in info]
     pk = [r[1] for r in sorted((r for r in info if r[5]), key=lambda r: r[5])]
+    column_map = UPLOAD_COLUMN_MAP.get(table.upper(), {})
+    target_cols = [column_map.get(c, c) for c in cols]
+    target_pk = [column_map.get(c, c) for c in pk]
     sql = "INSERT INTO %s (%s) VALUES (%s)" % (
-        q(table), ", ".join(map(q, cols)), ", ".join("?" * len(cols)))
+        q(table), ", ".join(map(q, target_cols)), ", ".join("?" * len(cols)))
     if pk:
-        rest = [c for c in cols if c not in pk]
-        sql += " ON CONFLICT (%s) " % ", ".join(map(q, pk))
+        rest = [c for c in target_cols if c not in target_pk]
+        sql += " ON CONFLICT (%s) " % ", ".join(map(q, target_pk))
         sql += ("DO UPDATE SET " + ", ".join("%s = excluded.%s" % (q(c), q(c)) for c in rest)) if rest else "DO NOTHING"
     return cols, pk, sql
+
+
+def _upload_row(table, cols, row):
+    if table.upper() != "USERS":
+        return row
+    return tuple(0 if col == "IS_ADMIN" and value is None else value
+                 for col, value in zip(cols, row))
 
 
 def push(sqlite_path, db_name):
@@ -127,7 +138,7 @@ def push(sqlite_path, db_name):
             target.run([("DELETE FROM %s" % q(name), None)])
         total, batch, size = 0, [], 0
         for row in db.execute("SELECT %s FROM %s" % (", ".join(map(q, cols)), q(name))):
-            batch.append((sql, row))
+            batch.append((sql, _upload_row(name, cols, row)))
             size += sum(len(v) if isinstance(v, str) else 16 for v in row if v is not None)
             if len(batch) >= MAX_STMTS or size >= MAX_BYTES:
                 target.run(batch)
